@@ -146,25 +146,28 @@ void Polynome::recursivePrint(string &output, OperatorPrecedence::Order order) c
     stringstream ss;
     // special treatment to the first constant
     // not "ax^0", but "a"
-    vector<double>::const_iterator it = para.begin();
-    ss<<*it;
-    it++;
+    assert(para.size() >= 2);
+    if (para[0] != 0)
+        ss<<para[0];
     // special treatment to the second term
     // not "ax^1", but "ax"
-    if (para.size() >= 2) {
-        ss<<"+"<<*it<<"x";
-        it++;
-        int power = 2;
-        for (; it != para.end(); it++) {
+    if (para[1] != 0) {
+        if (para[1] > 0)
             ss<<"+";
-            ss<<*it<<"x^"<<power;
-            power++;
-        }
+        ss<<para[1]<<"x";
     }
+
+    for (int i = 2; i < para.size(); i++) {
+        if (para[i] == 0) continue;
+        if (para[i] > 0)
+            ss<<"+";
+        ss<<para[i]<<"x^"<<i;
+    }
+
     string s("Poly[");
     s += ss.str();
     s += "]";
-    output+=s;
+    output += s;
 }
 
 Polynome::Polynome(double a, double b)
@@ -192,6 +195,8 @@ Polynome::Polynome(const vector<double> &parametre)
     for (int i = para.size()-1; i >= 0; i--) {
         if (para[i] == 0)
             para.pop_back();
+        else
+            break;
     }
     assert(para.size() >= 2);
 }
@@ -239,7 +244,7 @@ void Operator::recursivePrint(string &output, OperatorPrecedence::Order order) c
     case Add:
     case Sub:
     case Minus:
-        if (order > OperatorPrecedence::AddSub) {
+        if (order >= OperatorPrecedence::AddSub) {
             output.push_back('(');
             closeParenthese = true;
         }
@@ -247,70 +252,145 @@ void Operator::recursivePrint(string &output, OperatorPrecedence::Order order) c
         break;
     case Multi:
     case Divide:
-        if (order > OperatorPrecedence::MultiDivide) {
+        if (order >= OperatorPrecedence::MultiDivide) {
             output.push_back('(');
             closeParenthese = true;
         }
         nextOrder = OperatorPrecedence::MultiDivide;
         break;
     case Power:
-        if (order > OperatorPrecedence::Power) {
+        if (order >= OperatorPrecedence::Power) {
             output.push_back('(');
             closeParenthese = true;
         }
         nextOrder = OperatorPrecedence::Power;
         break;
+    case Composition:
+        if (order >= OperatorPrecedence::Composition) {
+            output.push_back('(');
+            closeParenthese = true;
+        }
+        nextOrder = OperatorPrecedence::Composition;
+        break;
     default:
         assert(false);
+    }
+    char symbol;
+    switch (type) {
+    case Add:
+        symbol = '+';
+        break;
+    case Sub:
+        symbol = '-';
+        break;
+    case Multi:
+        symbol = '*';
+        break;
+    case Divide:
+        symbol = '/';
+        break;
+    case Power:
+        symbol = '^';
+        break;
+    case Minus:
+        symbol = '-';
+        break;
+    case Composition:
+    {
+        ElementryFunction *f = dynamic_cast<ElementryFunction *>(leftChild);
+        if (f) {
+            f->compositionPrint(output, rightChild);
+            if (closeParenthese)
+                output.push_back(')');
+            return;
+        } else {
+            symbol = 'o';
+        }
+        break;
+    }
+    default:
+        throw invalid_argument("invalid operator");
     }
     if (leftChild)// e.g. -A, leftChild=NULL
         leftChild->recursivePrint(output, nextOrder);
     output.push_back(symbol);
     rightChild->recursivePrint(output, nextOrder);
-    if(closeParenthese)
+    if (closeParenthese)
         output.push_back(')');
 }
 
-Operator::Operator(char op, Expression *left, Expression *right)
+void Operator::construct(Operator::Type optType, Expression *left, Expression *right)
 {
-    if (!left || !right)
-        throw invalid_argument("invalid expression");
-    switch (op) {
-    case '+':
-        type = Add;
+    if ((!left || !right) && optType != Minus)
+        throw invalid_argument("expression is null");
+    type = optType;
+    switch (optType) {
+    case Add:
         opFunction = &opPlus;
         break;
-    case '-':
-        type = Sub;
+    case Sub:
         opFunction = &opSub;
         break;
-    case '*':
-        type = Multi;
+    case Multi:
         opFunction = &opMulti;
         break;
-    case '/':
-        type = Divide;
+    case Divide:
         opFunction = &opDivide;
+        break;
+    case Power:
+        opFunction = &opPower;
+        break;
+    case Minus:
+        if (left != 0)
+            throw invalid_argument("'minus' can't take two expressions");
+        opFunction = &opMinus;
+        break;
+    case Composition:
+        opFunction = &opComposition;
         break;
     default:
         throw invalid_argument("invalid operator");
     }
     leftChild = left;
     rightChild = right;
-    symbol = op;
+}
+
+Operator::Operator(Operator::Type optType, Expression *left, Expression *right)
+{
+    construct(optType, left, right);
+}
+
+Operator::Operator(char op, Expression *left, Expression *right)
+{
+    Type optType;
+    switch (op) {
+    case '+':
+        optType = Add;
+        break;
+    case '-':
+        optType = Sub;
+        break;
+    case '*':
+        optType = Multi;
+        break;
+    case '/':
+        optType = Divide;
+        break;
+    case '^':
+        optType = Power;
+        break;
+    default:
+        throw invalid_argument("invalid operator");
+    }
+    construct(optType, left, right);
 }
 
 Operator::Operator(char op, Expression *right)
 {
     if (op != '-')
         throw invalid_argument("invalid unary operator");
-    if (!right)
-        throw invalid_argument("invalid expression");
     type = Minus;
-    symbol = op;
-    opFunction = opMinus;
-    leftChild = NULL;
-    rightChild = right;
+    construct(Minus, NULL, right);
 }
 
 double Operator::operator ()(double x) const
@@ -324,30 +404,44 @@ Expression *Operator::diff() const
     case Add:
     case Sub:
         assert(leftChild && rightChild);
-        return new Operator(this->symbol, leftChild->diff(), rightChild->diff());
+        return new Operator(type, leftChild->diff(), rightChild->diff());
         break;
     case Multi:
     {
         assert(leftChild && rightChild);
-        Expression *df_g = new Operator('*', leftChild->diff(), rightChild->clone());
-        Expression *f_dg = new Operator('*', leftChild->clone(), rightChild->diff());
-        return new Operator('+', df_g, f_dg);
+        Expression *df_g = new Operator(Multi, leftChild->diff(), rightChild->clone());
+        Expression *f_dg = new Operator(Multi, leftChild->clone(), rightChild->diff());
+        return new Operator(Add, df_g, f_dg);
         break;
     }
     case Divide:
     {
         assert(leftChild && rightChild);
-        Expression *df_g = new Operator('*', leftChild->diff(), rightChild->clone());
-        Expression *f_dg = new Operator('*', leftChild->clone(), rightChild->diff());
-        Expression *numerator = new Operator('+', df_g, f_dg);
-        Expression *g_sq = new Operator('*', rightChild->clone(), rightChild->clone());
-        return new Operator('/', numerator, g_sq);
+        Expression *df_g = new Operator(Multi, leftChild->diff(), rightChild->clone());
+        Expression *f_dg = new Operator(Multi, leftChild->clone(), rightChild->diff());
+        Expression *numerator = new Operator(Add, df_g, f_dg);
+        Expression *g_sq = new Operator(Multi, rightChild->clone(), rightChild->clone());
+        return new Operator(Divide, numerator, g_sq);
         break;
+    }
+    case Power:
+    {
+        assert(leftChild && rightChild);
+        // TODO
     }
     case Minus:
         assert(!leftChild && rightChild);
-        return new Operator(this->symbol, rightChild->diff());
+        return new Operator(Minus, rightChild->diff());
         break;
+    case Composition:
+    {
+        assert(leftChild && rightChild);
+        Expression *df = leftChild->diff();
+        Expression *dg = rightChild->diff();
+        Expression *dfog = new Operator(Composition, df, rightChild->clone());
+        return new Operator(Multi, dfog, dg);
+        break;
+    }
     default:
         assert(false);
     }
@@ -357,48 +451,14 @@ Expression *Operator::clone() const
 {
     Expression *newLeft = leftChild ? leftChild->clone() : NULL;
     Expression *newRight = rightChild ? rightChild->clone() : NULL;
-    return new Operator(this->symbol, newLeft, newRight);
-}
-
-void Composition::recursivePrint(string &output, OperatorPrecedence::Order order) const
-{
-    leftChild->recursivePrint(output, OperatorPrecedence::None);
-    output.push_back('(');
-    rightChild->recursivePrint(output, OperatorPrecedence::None);
-    output.push_back(')');
-}
-
-Composition::Composition(Expression *f, Expression *g)
-{
-    if (!f || !g)
-        throw invalid_argument("invalid expression");
-    leftChild = f;
-    rightChild = g;
-}
-
-double Composition::operator ()(double x) const
-{
-    return (*leftChild)((*rightChild)(x));
-}
-
-Expression *Composition::diff() const
-{
-    Expression *df = leftChild->diff();
-    Expression *dg = rightChild->diff();
-    Expression *dfog = new Composition(df, rightChild->clone());
-    return new Operator('*', dfog, rightChild->diff());
-}
-
-Expression *Composition::clone() const
-{
-    return new Composition(leftChild->clone(), rightChild->clone());
+    return new Operator(type, newLeft, newRight);
 }
 
 void Constant::recursivePrint(string &output, OperatorPrecedence::Order order) const
 {
     stringstream ss;
     ss<<this->c;
-    output+=ss.str();
+    output += ss.str();
 }
 
 string Expression::stringPrint() const
@@ -406,4 +466,120 @@ string Expression::stringPrint() const
     string s;
     recursivePrint(s, OperatorPrecedence::None);
     return s;
+}
+
+Expression *Trigo::diff() const
+{
+    switch (type) {
+    case Sin:
+        return new Trigo(Cos);
+        break;
+    case Cos:
+    {
+        Expression *c = new Trigo(Sin);
+        return new Operator(Operator::Minus, NULL, c);
+        break;
+    }
+    case Tan:
+    {
+        // 1/(cos*cos)
+        Expression *c1 = new Trigo(Cos);
+        Expression *c2 = new Trigo(Cos);
+        Expression *m = new Operator(Operator::Multi, c1, c2);
+        return new Operator(Operator::Divide, new Constant(1), m);
+        break;
+    }
+    default:
+        assert(false);
+    }
+}
+
+Expression *Trigo::clone() const
+{
+    return new Trigo(*this);
+}
+
+double Trigo::operator ()(double x) const
+{
+    switch (type) {
+    case Sin:
+        return sin(x);
+    case Cos:
+        return cos(x);
+    case Tan:
+        return tan(x);
+    default:
+        assert(false);
+    }
+}
+
+string Trigo::functionName() const
+{
+    switch (type) {
+    case Sin:
+        return "sin";
+    case Cos:
+        return "cos";
+    case Tan:
+        return "tan";
+    default:
+        assert(false);
+    }
+}
+
+Expression *Logarithm::diff() const
+{
+    // 1/x
+    return new Operator(Operator::Divide, new Constant(1), new VariableX);
+}
+
+Expression *Logarithm::clone() const
+{
+    return new Logarithm;
+}
+
+double Logarithm::operator ()(double x) const
+{
+    return log(x);
+}
+
+string Logarithm::functionName() const
+{
+    return string("ln");
+}
+
+Expression *Exponential::diff() const
+{
+    return new Exponential;
+}
+
+Expression *Exponential::clone() const
+{
+    return new Exponential;
+}
+
+double Exponential::operator ()(double x) const
+{
+    return exp(x);
+}
+
+string Exponential::functionName() const
+{
+    return string("exp");
+}
+
+void ElementryFunction::recursivePrint(string &output, OperatorPrecedence::Order order) const
+{
+    output += functionName();
+    output += "(x)";
+}
+
+void ElementryFunction::compositionPrint(string &output, const Expression *innerFunction) const
+{
+    string inner;
+    innerFunction->recursivePrint(inner, OperatorPrecedence::None);
+    output += functionName();
+    output += "(";
+    output += inner;
+    output += ")";
 }

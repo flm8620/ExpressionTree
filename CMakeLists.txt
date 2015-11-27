@@ -1,5 +1,5 @@
 project(functionExpression)
 cmake_minimum_required(VERSION 2.8)
-aux_source_directory(. SRC_LIST)
-add_executable(${PROJECT_NAME} ${SRC_LIST})
-
+#aux_source_directory(. SRC_LIST)
+add_executable(${PROJECT_NAME} main.cpp function.cpp function.h)
+add_executable(UnitTest starttest.cpp function_test.cpp function.cpp)
