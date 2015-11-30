@@ -45,63 +45,124 @@ struct Symbol {
 
 class Expression
 {
-protected:
-    Expression *leftChild;
-    Expression *rightChild;
-
 public:
-    Expression(){leftChild=0;rightChild=0;}
+    enum NodeType {
+        TypeConstant,
+        TypeVariable,
+        TypeAdd,
+        TypeMulti,
+        TypeDivide,
+        TypePower,
+        TypeCompo,
+        TypePoly,
+        TypeTrigo,
+        TypeExp,
+        TypeLog
+    };
+    NodeType type;
+public:
+    Expression(NodeType type) : type(type){}
+    NodeType nodeType(){return type; }
+    bool CanonicalEqualTo(Expression *other);
+    bool CanonicalSmallerThan(Expression *other);
+    virtual bool CanonicalEqualToSameType(Expression *other) = 0;
+    virtual bool CanonicalSmallerThanSameType(Expression *other) = 0;
     virtual Expression *diff() const = 0;
     virtual Expression *clone() const = 0;
     virtual double operator ()(double x) const = 0;
     virtual void recursivePrint(std::string &output, OperatorPrecedence::Order order) const = 0;
     virtual std::string stringPrint() const;
-    virtual ~Expression(){delete leftChild; delete rightChild; }
-    // virtual bool TryToSimplifyWith(Expression *opt) const = 0;
+    virtual ~Expression(){}
+    // return NULL if it can't simplify
+    virtual Expression *TryToSimplifyAddingWith(Expression *right) const = 0;
+    virtual Expression *TryToSimplifyMultiplingWith(Expression *right) const = 0;
+    virtual Expression *TryToSimplifyDividedBy(Expression *right) const = 0;
+    virtual Expression *TryToSimplifyDividing(Expression *left) const = 0;
+    virtual Expression *TryToSimplifyPoweredBy(Expression *right) const = 0;
+    virtual Expression *TryToSimplifyPowering(Expression *left) const = 0;
+    virtual Expression *TryToSimplifyComposedBy(Expression *right) const = 0;
+    virtual Expression *TryToSimplifyComposing(Expression *left) const = 0;
+    virtual void simplify()=0;
+};
+class CommutativeOperators : public Expression
+{
+protected:
+    std::vector<Expression *> childrenList;
+    void recursivePrintCommutative(std::string &output, OperatorPrecedence::Order order,
+                                   OperatorPrecedence::Order selfOrder, char symbol) const;
+    void construct(std::vector<Expression *> list);
+    void construct(Expression *a, Expression *b);
+    void sortChildren();
+public:
+    CommutativeOperators(NodeType type) : Expression(type){}
+    bool CanonicalEqualToSameType(Expression *other);
+    bool CanonicalSmallerThanSameType(Expression *other);
+    Expression *clone() const;
+    virtual ~CommutativeOperators();
 };
 
-class Operator : public Expression
+class Addition : public CommutativeOperators
 {
 public:
-    enum Type {
-        Add,            // A+B
-        Sub,            // A-B
-        Multi,          // A*B
-        Divide,         // A/B
-        Power,          // A^B
-        Minus,          // -A
-        Composition     // f(g(x))
-    };
-private:
-    Type type;
-    double opPlus(double x) const {return (*leftChild)(x)+(*rightChild)(x); }
-    double opSub(double x) const {return (*leftChild)(x)-(*rightChild)(x); }
-    double opMulti(double x) const {return (*leftChild)(x)*(*rightChild)(x); }
-    double opDivide(double x) const {return (*leftChild)(x)/(*rightChild)(x); }
-    double opPower(double x) const {return pow((*leftChild)(x), (*rightChild)(x)); }
-    double opMinus(double x) const {return -(*leftChild)(x); }
-    double opComposition(double x) const {return (*leftChild)((*rightChild)(x)); }
+    Addition(std::vector<Expression *> &exprs) : CommutativeOperators(TypeAdd){construct(exprs); }
+    Addition(Expression *a, Expression *b) : CommutativeOperators(TypeAdd){construct(a, b); }
+    double operator ()(double x) const;
+    void recursivePrint(std::string &output, OperatorPrecedence::Order order) const;
+    Expression *diff() const;
+};
 
-    // pointer to member function
-    double (Operator::*opFunction)(double) const;
-    // if not in c++11
-    void construct(Type optType, Expression *left, Expression *right);
+class Multiplication : public CommutativeOperators
+{
 public:
+    Multiplication(std::vector<Expression *> &exprs) : CommutativeOperators(TypeMulti)
+    {
+        construct(exprs);
+    }
 
-    Operator(Type optType, Expression *left, Expression *right);
-    Operator(char op, Expression *left, Expression *right);
-    Operator(char op, Expression *right);
+    Multiplication(Expression *a, Expression *b) : CommutativeOperators(TypeMulti)
+    {
+        construct(a, b);
+    }
+
+    double operator ()(double x) const;
+    void recursivePrint(std::string &output, OperatorPrecedence::Order order) const;
+    Expression *diff() const;
+};
+
+class Divide : public Expression
+{
+    Expression *numerator, *denominator;
+public:
+    Divide(Expression *numerator, Expression *denominator);
+    bool CanonicalEqualToSameType(Expression *other);
+    bool CanonicalSmallerThanSameType(Expression *other);
     double operator ()(double x) const;
     void recursivePrint(std::string &output, OperatorPrecedence::Order order) const;
     Expression *diff() const;
     Expression *clone() const;
+    ~Divide();
+};
+class Composition : public Expression
+{
+    Expression *left, *right;
+public:
+    Composition(Expression *left, Expression *right);
+    bool CanonicalEqualToSameType(Expression *other);
+    bool CanonicalSmallerThanSameType(Expression *other);
+    double operator ()(double x) const {return (*left)((*right)(x)); }
+    void recursivePrint(std::string &output, OperatorPrecedence::Order order) const;
+    Expression *diff() const;
+    Expression *clone() const;
+    ~Composition(){delete left; delete right; }
 };
 
 class Constant : public Expression
 {
     double c;
 public:
-    Constant(double c) : c(c){}
+    Constant(double c) : Expression(TypeConstant), c(c){}
+    bool CanonicalEqualToSameType(Expression *other);
+    bool CanonicalSmallerThanSameType(Expression *other);
     double operator ()(double x) const {return c; }
     void recursivePrint(std::string &output, OperatorPrecedence::Order order) const;
     Expression *diff() const {return new Constant(0); }
@@ -111,7 +172,9 @@ public:
 class VariableX : public Expression
 {
 public:
-    VariableX(){}
+    VariableX() : Expression(TypeVariable){}
+    bool CanonicalEqualToSameType(Expression *other){return true; }
+    bool CanonicalSmallerThanSameType(Expression *other){return false; }
     double operator ()(double x) const {return x; }
     void recursivePrint(std::string &output, OperatorPrecedence::Order order) const
     {
@@ -130,6 +193,8 @@ protected:
     Polynome(double a, double b);
 public:
     Polynome(const std::vector<double> &parametre);
+    bool CanonicalEqualToSameType(Expression *other);
+    bool CanonicalSmallerThanSameType(Expression *other);
     double operator ()(double x) const;
     void recursivePrint(std::string &output, OperatorPrecedence::Order order) const;
     Expression *diff() const;
@@ -139,15 +204,10 @@ public:
     }
 };
 
-class Affine : public Polynome
-{
-public:
-    Affine(double a, double b) : Polynome(a, b){}
-};
-
 class ElementryFunction : public Expression
 {
 public:
+    ElementryFunction(NodeType type) : Expression(type){}
     void recursivePrint(std::string &output, OperatorPrecedence::Order order) const;
     // used in the case of composition, such as sin( cos(x) )
     void compositionPrint(std::string &output, const Expression *innerFunction) const;
@@ -156,13 +216,15 @@ public:
 class Trigo : public ElementryFunction
 {
 public:
-    enum Type {
+    enum TrigoType {
         Sin, Cos, Tan
     };
 private:
-    Type type;
+    TrigoType trigoType;
 public:
-    Trigo(Type trigoType) : type(trigoType){}
+    Trigo(TrigoType trigoType) : ElementryFunction(TypeTrigo), trigoType(trigoType){}
+    bool CanonicalEqualToSameType(Expression *other);
+    bool CanonicalSmallerThanSameType(Expression *other);
     virtual Expression *diff() const;
     virtual Expression *clone() const;
     virtual double operator()(double x) const;
@@ -171,6 +233,9 @@ public:
 class Logarithm : public ElementryFunction
 {
 public:
+    Logarithm() : ElementryFunction(TypeLog){}
+    bool CanonicalEqualToSameType(Expression *other){return true; }
+    bool CanonicalSmallerThanSameType(Expression *other){return false; }
     virtual Expression *diff() const;
     virtual Expression *clone() const;
     virtual double operator ()(double x) const;
@@ -179,6 +244,9 @@ public:
 class Exponential : public ElementryFunction
 {
 public:
+    Exponential() : ElementryFunction(TypeExp){}
+    bool CanonicalEqualToSameType(Expression *other){return true; }
+    bool CanonicalSmallerThanSameType(Expression *other){return false; }
     virtual Expression *diff() const;
     virtual Expression *clone() const;
     virtual double operator ()(double x) const;

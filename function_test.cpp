@@ -19,7 +19,7 @@ TEST_CASE("Trigo functions", "[funtion][trigo]") {
     REQUIRE((*d).stringPrint() == string("cos(x)"));
     delete d;
     d = Ecos->diff();
-    REQUIRE((*d).stringPrint() == string("-sin(x)"));
+    REQUIRE((*d).stringPrint() == string("-1*sin(x)"));
     delete d;
     d = Etan->diff();
     REQUIRE((*d).stringPrint() == string("1/(cos(x)*cos(x))"));
@@ -41,7 +41,7 @@ TEST_CASE("Constant", "[function][const]"){
     REQUIRE(d->stringPrint() == "0");
     REQUIRE((*d)(1.23) == 0);
     delete d;
-    delete E1, E2, E3;
+    delete E1;delete E2;delete E3;
 }
 
 TEST_CASE("log and exp"){
@@ -53,7 +53,7 @@ TEST_CASE("log and exp"){
     REQUIRE(dln->stringPrint() == "1/x");
     REQUIRE(eexp->stringPrint() == "exp(x)");
     REQUIRE(dexp->stringPrint() == "exp(x)");
-    delete ln, eexp, dln, dexp;
+    delete ln;delete eexp;delete dln;delete dexp;
 }
 TEST_CASE("polynomial"){
     vector<double> a;
@@ -75,34 +75,31 @@ TEST_CASE("polynomial"){
     poly = new Polynome(a);
     REQUIRE(poly->stringPrint() == "Poly[1-2x+3x^2+5.1x^4]");
     delete poly;
-    poly=new Affine(2,3.1);
-    REQUIRE(poly->stringPrint()=="Poly[3.1+2x]");
-    delete poly;
 }
 
 TEST_CASE("operator"){
     Expression* e1=new Constant(2.1);
     Expression* e2=new Trigo(Trigo::Sin);
-    Expression* ep=new Operator(Operator::Add,e1,e2);
+    Expression* ep=new Addition(e1,e2);
     REQUIRE(ep->stringPrint()=="2.1+sin(x)");
     delete ep;//e1 e2 deleted
     e1=new Constant(2.1);
     e2=new Trigo(Trigo::Sin);
-    ep=new Operator(Operator::Sub,e2,e1);
-    REQUIRE(ep->stringPrint()=="sin(x)-2.1");
+    ep=new Addition(e2,e1);
+    REQUIRE(ep->stringPrint()=="sin(x)+2.1");
     delete ep;//e1 e2 deleted
     e1=new Constant(2.1);
     e2=new Trigo(Trigo::Sin);
     Expression *e3=new VariableX;
-    ep=new Operator(Operator::Sub,e2,e1);
-    Expression *em=new Operator(Operator::Multi,e3,ep);
-    REQUIRE(em->stringPrint()=="x*(sin(x)-2.1)");
+    ep=new Addition(e2,e1);
+    Expression *em=new Multiplication(e3,ep);
+    REQUIRE(em->stringPrint()=="x*(sin(x)+2.1)");
     delete em;
     e1=new Constant(2.1);
     e2=new Trigo(Trigo::Sin);
     e3=new Trigo(Trigo::Sin);
-    ep=new Operator(Operator::Divide,e1,e2);
-    em=new Operator(Operator::Composition,e3,ep);
+    ep=new Divide(e1,e2);
+    em=new Composition(e3,ep);
     REQUIRE(em->stringPrint()=="sin(2.1/sin(x))");
     delete em;
 
