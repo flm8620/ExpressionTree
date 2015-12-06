@@ -27,7 +27,7 @@ struct ExpressionComparator {
 };
 
 class Expression {
-public:
+ public:
   enum NodeType {
     TypeConstant,
     TypeVariable,
@@ -43,10 +43,10 @@ public:
   };
   NodeType type;
 
-public:
+ public:
   Expression(NodeType type) : type(type) { }
 
-  NodeType nodeType() { return type; }
+  NodeType nodeType() const { return type; }
 
   bool CanonicalEqualTo(Expression *other);
   bool CanonicalSmallerThan(Expression *other);
@@ -57,7 +57,7 @@ public:
   virtual double operator()(double x) const = 0;
   virtual void recursivePrint(std::string &output, OperatorPrecedence::Order order) const = 0;
   virtual std::string stringPrint() const;
-
+  Expression *diffSimplify() const;
   virtual ~Expression() { }
 
   // return NULL if it can't simplify or the simplification doesn't
@@ -88,7 +88,7 @@ public:
 typedef std::multiset<Expression *, ExpressionComparator> ExpressionSet;
 
 class CommutativeOperators: public Expression {
-protected:
+ protected:
   ExpressionSet childrenSet;
   void recursivePrintCommutative
       (std::string &output, OperatorPrecedence::Order order, OperatorPrecedence::Order selfOrder, char symbol) const;
@@ -96,7 +96,7 @@ protected:
   void construct(Expression *a, Expression *b);
   //return true if children changed
   bool simplifyChildren();
-public:
+ public:
   CommutativeOperators(NodeType type) : Expression(type) {
   }
 
@@ -107,7 +107,7 @@ public:
 };
 
 class Addition: public CommutativeOperators {
-public:
+ public:
   Addition(ExpressionSet &exprs) : CommutativeOperators(TypeAdd) {
     construct(exprs);
   }
@@ -131,7 +131,7 @@ public:
 };
 
 class Multiplication: public CommutativeOperators {
-public:
+ public:
   Multiplication(ExpressionSet &exprs) : CommutativeOperators(TypeMulti) {
     construct(exprs);
   }
@@ -156,7 +156,8 @@ public:
 
 class Division: public Expression {
   Expression *numerator, *denominator;
-public:
+  bool simplifyChildren();
+ public:
   Division(Expression *numerator, Expression *denominator);
   bool CanonicalEqualToSameType(Expression *other);
   bool CanonicalSmallerThanSameType(Expression *other);
@@ -178,7 +179,7 @@ public:
 
 class Composition: public Expression {
   Expression *left, *right;
-public:
+ public:
   Composition(Expression *left, Expression *right);
   bool CanonicalEqualToSameType(Expression *other);
   bool CanonicalSmallerThanSameType(Expression *other);
@@ -209,7 +210,7 @@ public:
 
 class Constant: public Expression {
   double c;
-public:
+ public:
   Constant(double c) : Expression(TypeConstant), c(c) {
   }
 
@@ -241,11 +242,14 @@ public:
   // virtual Expression *TrySimplifyPowering(Expression *left) const = 0;
   // virtual Expression *TrySimplifyComposed(Expression *right) const = 0;
   // virtual Expression *TrySimplifyComposing(Expression *left) const = 0;
-  virtual Expression *simplify(bool &changed) { return NULL; }
+  virtual Expression *simplify(bool &changed) {
+    changed = false;
+    return NULL;
+  }
 };
 
 class VariableX: public Expression {
-public:
+ public:
   VariableX() : Expression(TypeVariable) { }
 
   bool CanonicalEqualToSameType(Expression *other) { return true; }
@@ -271,14 +275,19 @@ public:
   // virtual Expression *TrySimplifyPowering(Expression *left) const = 0;
   // virtual Expression *TrySimplifyComposed(Expression *right) const = 0;
   // virtual Expression *TrySimplifyComposing(Expression *left) const = 0;
-  virtual Expression *simplify(bool &changed) { return NULL; }
+  virtual Expression *simplify(bool &changed) {
+    changed = false;
+    return NULL;
+  }
 };
 
 class Polynomial: public Expression {
   std::vector<double> para;
-public:
+ public:
   Polynomial(const std::vector<double> &parametre);
   Polynomial(double a, double b);
+  static Expression *create(const std::vector<double> &parametre);
+  static Expression *create(double a, double b);
   bool CanonicalEqualToSameType(Expression *other);
   bool CanonicalSmallerThanSameType(Expression *other);
   double operator()(double x) const;
@@ -297,12 +306,15 @@ public:
   // virtual Expression *TrySimplifyPowering(Expression *left) const = 0;
   // virtual Expression *TrySimplifyComposed(Expression *right) const = 0;
   // virtual Expression *TrySimplifyComposing(Expression *left) const = 0;
-  virtual Expression *simplify(bool &changed) { return NULL; }
+  virtual Expression *simplify(bool &changed) {
+    changed = false;
+    return NULL;
+  }
 
 };
 
 class ElementryFunction: public Expression {
-public:
+ public:
   ElementryFunction(NodeType type) : Expression(type) {
   }
 
@@ -313,13 +325,13 @@ public:
 };
 
 class Trigo: public ElementryFunction {
-public:
+ public:
   enum TrigoType {
     Sin, Cos, Tan
   };
-private:
+ private:
   TrigoType trigoType;
-public:
+ public:
   Trigo(TrigoType trigoType) : ElementryFunction(TypeTrigo), trigoType(trigoType) {
   }
 
@@ -340,11 +352,14 @@ public:
   // virtual Expression *TrySimplifyPowering(Expression *left) const = 0;
   // virtual Expression *TrySimplifyComposed(Expression *right) const = 0;
   // virtual Expression *TrySimplifyComposing(Expression *left) const = 0;
-  virtual Expression *simplify(bool &changed) { return NULL; }
+  virtual Expression *simplify(bool &changed) {
+    changed = false;
+    return NULL;
+  }
 };
 
 class Logarithm: public ElementryFunction {
-public:
+ public:
   Logarithm() : ElementryFunction(TypeLog) {
   }
 
@@ -372,7 +387,7 @@ public:
 };
 
 class Exponential: public ElementryFunction {
-public:
+ public:
   Exponential() : ElementryFunction(TypeExp) {
   }
 

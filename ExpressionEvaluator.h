@@ -36,7 +36,7 @@ struct Symbol {
 };
 
 class ExpressionEvaluator {
-private:
+ private:
   std::string expression;
   int pos;
   std::queue<Symbol> symbolQueue;
@@ -44,7 +44,7 @@ private:
   void stringDecomposition();
   void reversePolishNotation();
   Expression *constructTree();
-public:
+ public:
   Expression *evaluate(const std::string &s);
 };
 

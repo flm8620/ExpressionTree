@@ -2,7 +2,7 @@
 #include <stdexcept>
 #include <sstream>
 #include <algorithm>
-
+#include <iostream>
 using namespace std;
 
 bool Expression::CanonicalEqualTo(Expression *other) {
@@ -23,6 +23,18 @@ string Expression::stringPrint() const {
   string s;
   recursivePrint(s, OperatorPrecedence::None);
   return s;
+}
+
+Expression *Expression::diffSimplify() const {
+  Expression *d = this->diff();
+  bool changed;
+  Expression *dsim = d->simplify(changed);
+  if (dsim) {
+    delete d;
+    return dsim;
+  } else {
+    return d;
+  }
 }
 
 void CommutativeOperators::recursivePrintCommutative(string &output,
@@ -47,6 +59,8 @@ void CommutativeOperators::recursivePrintCommutative(string &output,
 }
 
 void CommutativeOperators::construct(ExpressionSet children) {
+  if (children.size() <= 1)
+    throw invalid_argument("childrenSet should have more than 1 element");
   for (auto i = children.begin(); i != children.end(); i++)
     if (*i == 0) throw invalid_argument("Null pointers in arguments");
   this->childrenSet = children;
@@ -73,11 +87,16 @@ bool CommutativeOperators::simplifyChildren() {
         delete *i;
         i = childrenSet.erase(i);
         childrenSet.insert(simplified);
+        if (i == childrenSet.end())
+          break;
       } else if (childChanged) {
         changed = true;
+        needContinue = true;
         Expression *afterChange = *i;
         i = childrenSet.erase(i);
         childrenSet.insert(afterChange);
+        if (i == childrenSet.end())
+          break;
       }
     }
   }
@@ -126,7 +145,12 @@ Expression *CommutativeOperators::clone() const {
   ExpressionSet cl;
   for (auto i = childrenSet.begin(); i != childrenSet.end(); i++)
     cl.insert((*i)->clone());
-  return new Addition(cl);
+  if (this->nodeType() == TypeAdd)
+    return new Addition(cl);
+  else if (this->nodeType() == TypeMulti)
+    return new Multiplication(cl);
+  else
+    assert(false);
 }
 
 CommutativeOperators::~CommutativeOperators() {
@@ -153,7 +177,7 @@ Expression *Addition::diff() const {
 }
 
 Expression *Addition::TrySimplifyAdding(Expression *right) {
-  assert(false);//must have been treated in Addition::simplify()
+  //must have been treated in Addition::simplify()
   return nullptr;
 }
 
@@ -198,7 +222,7 @@ Expression *Addition::simplify(bool &changed) {
       }
 
       if (it == childrenSet.end())
-        continue;
+        break;
       auto next = it;
       next++;
       if (next == childrenSet.end())
@@ -206,7 +230,7 @@ Expression *Addition::simplify(bool &changed) {
 
       //simplify two by two
       for (; next != childrenSet.end(); next++) {
-        assert(it!=next);
+        assert(it != next);
         if ((*it)->CanonicalEqualTo(*next)) {
           //a+a=2*a
           changed = true;
@@ -245,11 +269,14 @@ Expression *Addition::simplify(bool &changed) {
         }
 
       }
-
+      if (it == childrenSet.end())
+        break;
     }
   }
   if (childrenSet.size() == 0) {
     return new Constant(0);
+  } else if (childrenSet.size() == 1) {
+    return (*childrenSet.begin())->clone();
   } else {
     return NULL;
   }
@@ -324,32 +351,38 @@ Expression *Multiplication::TrySimplifyAdding(Expression *right) {
     return NULL;
   // case of this==right should be already treated in Addition: a+a=2*a
   assert(!(A.empty() && B.empty()));
-  // now, A,B,commonElements have the ownership of their elements
+  // now, Aown,Bown,commonElementsOwn have the ownership of their elements
+  ExpressionSet Aown, Bown, commonElementsOwn;
   for (auto item : A) {
-    item = item->clone();
+    Aown.insert(item->clone());
   }
   for (auto item : B) {
-    item = item->clone();
+    Bown.insert(item->clone());
   }
   for (auto item : commonElements) {
-    item = item->clone();
+    commonElementsOwn.insert(item->clone());
   }
   Expression *multiA;
   Expression *multiB;
-  if (A.empty()) {
+  if (Aown.empty()) {
     multiA = new Constant(1);
-    multiB = new Multiplication(B);
+    multiB = (Bown.size() == 1) ? *(Bown.begin()) : new Multiplication(Bown);
   } else if (B.empty()) {
     multiB = new Constant(1);
-    multiA = new Multiplication(A);
+    multiA = (Aown.size() == 1) ? *(Aown.begin()) : new Multiplication(Aown);
+  } else {
+    multiA = (Aown.size() == 1) ? *(Aown.begin()) : new Multiplication(Aown);
+    multiB = (Bown.size() == 1) ? *(Bown.begin()) : new Multiplication(Bown);
   }
   Expression *AplusB = new Addition(multiA, multiB);
-  commonElements.insert(AplusB);
-  Expression *final = new Multiplication(commonElements);
+  commonElementsOwn.insert(AplusB);
+  Expression *final = new Multiplication(commonElementsOwn);
   bool changed;
   Expression *finalSimplified = final->simplify(changed);
-  if (finalSimplified)
+  if (finalSimplified) {
+    delete final;
     return finalSimplified;
+  }
   else
     return final;
 }
@@ -361,16 +394,19 @@ Expression *Multiplication::TrySimplifyMultiplying(Expression *right) {
 
 Expression *Multiplication::simplify(bool &changed) {
   bool needContinue = true;
+  changed = false;
   while (needContinue) {
     needContinue = false;
     if (this->simplifyChildren()) {
       changed = true;
       //needContinue = true;
     }
+
     for (auto it = childrenSet.begin(); it != childrenSet.end(); it++) {
       switch ((*it)->nodeType()) {
         case TypeMulti: {
           Multiplication *p = static_cast<Multiplication *>(*it);
+          it = childrenSet.erase(it);
           childrenSet.insert(p->childrenSet.begin(), p->childrenSet.end());
           p->childrenSet.clear();
           delete p;
@@ -386,15 +422,18 @@ Expression *Multiplication::simplify(bool &changed) {
             delete *it;
             it = childrenSet.erase(it);
           } else if (p->value() == 0) {
+            for (auto item : childrenSet)
+              delete item;
             childrenSet.clear();
             changed = true;
-            needContinue = false;
+            return new Constant(0);
           }
+          break;
         }
       }
 
       if (it == childrenSet.end())
-        continue;
+        break;
       auto next = it;
       next++;
       if (next == childrenSet.end())
@@ -429,9 +468,34 @@ Expression *Multiplication::simplify(bool &changed) {
   }
   if (childrenSet.size() == 0) {
     return new Constant(0);
+  } else if (childrenSet.size() == 1) {
+    return (*childrenSet.begin())->clone();
   } else {
     return NULL;
   }
+}
+
+bool Division::simplifyChildren() {
+  bool childChanged;
+  bool changed = false;
+  Expression *nume = numerator->simplify(childChanged);
+  if (nume) {
+    changed = true;
+    delete numerator;
+    numerator = nume;
+  } else {
+    changed = childChanged || changed;
+  }
+  Expression *deno = denominator->simplify(childChanged);
+
+  if (deno) {
+    changed = true;
+    delete denominator;
+    denominator = deno;
+  } else {
+    changed = childChanged || changed;
+  }
+  return changed;
 }
 
 Division::Division(Expression *numerator, Expression *denominator) :
@@ -501,18 +565,18 @@ Division::~Division() {
 
 Expression *Division::TrySimplifyAdding(Expression *right) {
   // a/c + b/c = (a+b)/c
-  if(right->nodeType()==TypeDivide) {
-    Division *p = static_cast<Division*>(right);
-    if(denominator->CanonicalEqualTo(p->denominator)){
-      Expression *a_plus_b= new Addition(numerator->clone(),p->numerator->clone());
+  if (right->nodeType() == TypeDivide) {
+    Division *p = static_cast<Division *>(right);
+    if (denominator->CanonicalEqualTo(p->denominator)) {
+      Expression *a_plus_b = new Addition(numerator->clone(), p->numerator->clone());
       Expression *c = p->denominator->clone();
-      Expression *abc= new Division(a_plus_b,c);
+      Expression *abc = new Division(a_plus_b, c);
       bool changed;
-      Expression *simplify=abc->simplify(changed);
-      if(simplify) {
+      Expression *simplify = abc->simplify(changed);
+      if (simplify) {
         delete abc;
         return simplify;
-      }else{
+      } else {
         return abc;
       }
     }
@@ -521,30 +585,30 @@ Expression *Division::TrySimplifyAdding(Expression *right) {
 }
 
 Expression *Division::TrySimplifyMultiplying(Expression *right) {
-  if(right->nodeType()==TypeDivide){
+  if (right->nodeType() == TypeDivide) {
     // (a/b)*(c/d)=(a*c)/(b*d)
-    Division *p = static_cast<Division*>(right);
-    Expression *ac=new Multiplication(numerator->clone(),p->denominator->clone());
-    Expression *bd=new Multiplication(denominator->clone(),p->numerator->clone());
-    Expression *acbd=new Division(ac,bd);
+    Division *p = static_cast<Division *>(right);
+    Expression *ac = new Multiplication(numerator->clone(), p->denominator->clone());
+    Expression *bd = new Multiplication(denominator->clone(), p->numerator->clone());
+    Expression *acbd = new Division(ac, bd);
     bool changed;
-    Expression *simplify=acbd->simplify(changed);
-    if(simplify) {
+    Expression *simplify = acbd->simplify(changed);
+    if (simplify) {
       delete acbd;
       return simplify;
-    }else{
+    } else {
       return acbd;
     }
-  }else{
+  } else {
     // (a/b)*c = a*c / b
-    Expression *ac=new Multiplication(numerator->clone(),right->clone());
-    Expression *acb=new Division(ac,denominator->clone());
+    Expression *ac = new Multiplication(numerator->clone(), right->clone());
+    Expression *acb = new Division(ac, denominator->clone());
     bool changed;
-    Expression *simplify=acb->simplify(changed);
-    if(simplify) {
+    Expression *simplify = acb->simplify(changed);
+    if (simplify) {
       delete acb;
       return simplify;
-    }else{
+    } else {
       return acb;
     }
   }
@@ -552,23 +616,8 @@ Expression *Division::TrySimplifyMultiplying(Expression *right) {
 }
 
 Expression *Division::simplify(bool &changed) {
-  bool childChanged;
-  Expression *nume = numerator->simplify(childChanged);
-  if (nume) {
-    changed = true;
-    delete numerator;
-    numerator = nume;
-  } else {
-    changed = childChanged || changed;
-  }
-  Expression *deno = denominator->simplify(childChanged);
-  if (deno) {
-    changed = true;
-    delete denominator;
-    denominator = deno;
-  } else {
-    changed = childChanged || changed;
-  }
+  changed = false;
+  changed = simplifyChildren() || changed;
   // 0/a = 0
   if (numerator->nodeType() == TypeConstant) {
     Constant *p = static_cast<Constant *>(numerator);
@@ -577,7 +626,7 @@ Expression *Division::simplify(bool &changed) {
     }
   }
   // a/1 = a
-  if(denominator->nodeType()==TypeConstant){
+  if (denominator->nodeType() == TypeConstant) {
     Constant *p = static_cast<Constant *>(denominator);
     if (p->value() == 1) {
       return numerator->clone();
@@ -589,7 +638,7 @@ Expression *Division::simplify(bool &changed) {
     bool denoDivision = denominator->nodeType() == TypeDivide;
     Expression *a = 0, *b = 0, *c = 0, *d = 0;
     if (numeDivision) {
-      changed=true;
+      changed = true;
       Division *p = static_cast<Division *>(numerator);
       //change ownership
       a = p->numerator;
@@ -600,7 +649,7 @@ Expression *Division::simplify(bool &changed) {
       numerator = a;
     }
     if (denoDivision) {
-      changed=true;
+      changed = true;
       Division *p = static_cast<Division *>(denominator);
       //change ownership
       c = p->numerator;
@@ -615,6 +664,7 @@ Expression *Division::simplify(bool &changed) {
     if (d)
       numerator = new Multiplication(numerator, d);
   }
+  changed = simplifyChildren() || changed;
   return NULL;
 }
 
@@ -679,6 +729,11 @@ Expression *Composition::TrySimplifyMultiplying(Expression *right) {
 }
 
 Expression *Composition::simplify(bool &changed) {
+  if (this->right->nodeType() == TypeVariable) {
+    changed = true;
+    return this->left->clone();
+  }
+  changed = false;
   return nullptr;
 }
 
@@ -707,19 +762,20 @@ Expression *Constant::TrySimplifyAdding(Expression *right) {
       return new Constant(this->c + p->c);
     }
     case TypeVariable: {
-      return new Polynomial(1, this->c);
+      return Polynomial::create(1, this->c);
     }
     case TypePoly: {
       Polynomial *p = static_cast<Polynomial * >(right);
       vector<double> para = p->getParameter();
       assert(para.size() > 1);
       para[0] += this->c;
-      return new Polynomial(para);
+      return Polynomial::create(para);
     }
     default:
       return NULL;
   }
 }
+
 
 Expression *Constant::TrySimplifyMultiplying(Expression *right) {
   assert(this->c != 0);
@@ -729,7 +785,7 @@ Expression *Constant::TrySimplifyMultiplying(Expression *right) {
       return new Constant(this->c * p->c);
     }
     case TypeVariable: {
-      return new Polynomial(this->c, 0);
+      return Polynomial::create(this->c, 0);
     }
     case TypePoly: {
       Polynomial *p = static_cast<Polynomial * >(right);
@@ -738,7 +794,7 @@ Expression *Constant::TrySimplifyMultiplying(Expression *right) {
       for (auto it = para.begin(); it != para.end(); it++) {
         *it *= this->c;
       }
-      return new Polynomial(para);
+      return Polynomial::create(para);
     }
     default:
       return NULL;
@@ -750,14 +806,14 @@ Expression *VariableX::TrySimplifyAdding(Expression *right) {
     case TypeConstant:
       assert(false);//should be treated by Constant
     case TypeVariable: {
-      return new Polynomial(2, 0);
+      return Polynomial::create(2, 0);
     }
     case TypePoly: {
       Polynomial *p = static_cast<Polynomial * >(right);
       vector<double> para = p->getParameter();
       assert(para.size() > 1);
       para[1] += 1;
-      return new Polynomial(para);
+      return Polynomial::create(para);
     }
     default:
       return NULL;
@@ -771,7 +827,7 @@ Expression *VariableX::TrySimplifyMultiplying(Expression *right) {
       para.push_back(0);
       para.push_back(0);
       para.push_back(1);
-      return new Polynomial(para);
+      return Polynomial::create(para);
     }
     case TypePoly: {
       Polynomial *p = static_cast<Polynomial * >(right);
@@ -782,7 +838,7 @@ Expression *VariableX::TrySimplifyMultiplying(Expression *right) {
         *it = *(it + 1);
       }
       para[0] = 0;
-      return new Polynomial(para);
+      return Polynomial::create(para);
     }
     default:
       return NULL;
@@ -792,16 +848,6 @@ Expression *VariableX::TrySimplifyMultiplying(Expression *right) {
 Polynomial::Polynomial(const vector<double> &parametre) :
     Expression(TypePoly) {
   this->para = parametre;
-  bool isConst = true;
-  if (para.size() <= 1) {
-    isConst = true;
-  } else {
-    for (int i = 1; i < para.size(); i++)
-      if (para[i] != 0) isConst = false;
-  }
-  if (isConst)
-    throw invalid_argument(
-        "Degenerate case not allowed, Polynomial can't be constant");
   // clear zeros at the end of list
   for (int i = para.size() - 1; i >= 0; i--) {
     if (para[i] == 0)
@@ -809,7 +855,11 @@ Polynomial::Polynomial(const vector<double> &parametre) :
     else
       break;
   }
-  assert(para.size() >= 2);
+  bool isConst = true;
+  if (para.size() <= 1) {
+    throw invalid_argument(
+        "Degenerate case not allowed, Polynomial can't be constant");
+  }
 }
 
 Polynomial::Polynomial(double a, double b) :
@@ -819,6 +869,32 @@ Polynomial::Polynomial(double a, double b) :
         "Degenerate case not allowed, Polynomial can't be constant");
   this->para.push_back(b);
   this->para.push_back(a);
+}
+
+Expression *Polynomial::create(const vector<double> &parametre) {
+  vector<double> para = parametre;
+  // clear zeros at the end of list
+  for (int i = para.size() - 1; i >= 0; i--) {
+    if (para[i] == 0)
+      para.pop_back();
+    else
+      break;
+  }
+  if (para.size() == 0) {
+    return new Constant(0);
+  } else if (para.size() == 1) {
+    return new Constant(para[0]);
+  } else {
+    return new Polynomial(para);
+  }
+}
+
+Expression *Polynomial::create(double a, double b) {
+  //ax+b
+  if (a == 0)
+    return new Constant(b);
+  else
+    return new Polynomial(a, b);
 }
 
 bool Polynomial::CanonicalEqualToSameType(Expression *other) {
@@ -859,21 +935,39 @@ double Polynomial::operator()(double x) const {
 
 void Polynomial::recursivePrint(string &output, OperatorPrecedence::Order order) const {
   stringstream ss;
+  bool firstItem = true;
   // special treatment to the first constant
   // not "ax^0", but "a"
   assert(para.size() >= 2);
-  if (para[0] != 0) ss << para[0];
+  if (para[0] != 0) {
+    ss << para[0];
+    firstItem = false;
+  }
   // special treatment to the second term
   // not "ax^1", but "ax"
   if (para[1] != 0) {
-    if (para[1] > 0) ss << "+";
-    ss << para[1] << "x";
+    char sym;
+    sym = para[1] > 0 ? '+' : '-';
+    // -x not -1x
+    if (sym == '-' || !firstItem)
+      ss << sym;
+    if (para[1] != 1 && para[1] != -1)
+      ss << abs(para[1]);
+    ss << "x";
+    firstItem = false;
   }
 
   for (int i = 2; i < para.size(); i++) {
     if (para[i] == 0) continue;
-    if (para[i] > 0) ss << "+";
-    ss << para[i] << "x^" << i;
+    char sym;
+    sym = para[i] > 0 ? '+' : '-';
+    // -x not -1x
+    if (sym == '-' || !firstItem)
+      ss << sym;
+    if (para[i] != 1 && para[i] != -1)
+      ss << abs(para[i]);
+    ss << "x^" << i;
+    firstItem = false;
   }
 
   string s("Poly[");
@@ -892,11 +986,7 @@ Expression *Polynomial::diff() const {
     temp.push_back(k * (*it));    // d(a*x^k)=a*k*x^(k-1)
     k++;
   }
-  assert(temp.size() >= 0);    // polynome isn't allowed to be constant
-  if (temp.size() == 1)
-    return new Constant(temp[0]);    // function is affine = ax+b, df=a
-  else
-    return new Polynomial(temp);
+  return Polynomial::create(temp);
 }
 
 Expression *Polynomial::clone() const {
@@ -923,13 +1013,7 @@ Expression *Polynomial::TrySimplifyAdding(Expression *right) {
         else
           break;
       }
-      if (newPara.size() > 1)
-        return new Polynomial(newPara);
-      else if (newPara.size() == 1) {
-        return new Constant(newPara[0]);
-      } else {
-        return new Constant(0);
-      }
+      return Polynomial::create(newPara);
     }
     default:
       return NULL;
@@ -953,8 +1037,7 @@ Expression *Polynomial::TrySimplifyMultiplying(Expression *right) {
           newPara[i + j] += this->para[i] * p->para[j];
         }
       }
-      assert(newPara[n + m - 1] != 0);
-      return new Polynomial(newPara);
+      return Polynomial::create(newPara);
     }
     default:
       return NULL;
@@ -1059,6 +1142,7 @@ string Logarithm::functionName() const {
   return string("ln");
 }
 
+
 Expression *Logarithm::TrySimplifyAdding(Expression *right) {
   //TODO
   return nullptr;
@@ -1071,13 +1155,13 @@ Expression *Logarithm::TrySimplifyMultiplying(Expression *right) {
 
 Expression *Logarithm::simplify(bool &changed) {
   //TODO
+  changed = false;
   return nullptr;
 }
 
 Expression *Exponential::diff() const {
   return new Exponential;
 }
-
 
 Expression *Exponential::clone() const {
   return new Exponential;
@@ -1107,5 +1191,6 @@ Expression *Exponential::TrySimplifyMultiplying(Expression *right) {
 
 Expression *Exponential::simplify(bool &changed) {
   //TODO
+  changed = false;
   return nullptr;
 }

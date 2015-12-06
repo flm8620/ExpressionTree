@@ -43,10 +43,38 @@ void ExpressionEvaluator::stringDecomposition() {
       symbolQueue.push(Symbol(x));
     } else if (c == '+') {
       ss.get();
-      symbolQueue.push(Symbol(Symbol::Add));
+      if (symbolQueue.size() == 0) {
+        symbolQueue.push(Symbol(Symbol::Positive));
+      } else {
+        switch (symbolQueue.back().type) {
+          case Symbol::FunName:
+          case Symbol::Number:
+          case Symbol::theVariableX:
+          case Symbol::RightParenthese:
+            symbolQueue.push(Symbol(Symbol::Add));
+            break;
+          default:
+            symbolQueue.push(Symbol(Symbol::Positive));
+            break;
+        }
+      }
     } else if (c == '-') {
       ss.get();
-      symbolQueue.push(Symbol(Symbol::Sub));
+      if (symbolQueue.size() == 0) {
+        symbolQueue.push(Symbol(Symbol::Negative));
+      } else {
+        switch (symbolQueue.back().type) {
+          case Symbol::FunName:
+          case Symbol::Number:
+          case Symbol::theVariableX:
+          case Symbol::RightParenthese:
+            symbolQueue.push(Symbol(Symbol::Sub));
+            break;
+          default:
+            symbolQueue.push(Symbol(Symbol::Negative));
+            break;
+        }
+      }
     } else if (c == '*') {
       ss.get();
       symbolQueue.push(Symbol(Symbol::Multi));
@@ -258,7 +286,7 @@ Expression *ExpressionEvaluator::constructTree() {
   Expression *e = exprStack.top();
   bool changed;
   Expression *simplify = e->simplify(changed);
-  if(simplify)
+  if (simplify)
     return simplify;
   else
     return e;
