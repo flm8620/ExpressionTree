@@ -1,5 +1,6 @@
 project(functionExpression)
 cmake_minimum_required(VERSION 2.8)
+SET(CMAKE_CXX_FLAGS "-std=c++0x")
 #aux_source_directory(. SRC_LIST)
-add_executable(${PROJECT_NAME} main.cpp function.cpp function.h)
-add_executable(UnitTest starttest.cpp function_test.cpp function.cpp)
+add_executable(${PROJECT_NAME} main.cpp function.cpp function.h ExpressionEvaluator.cpp ExpressionEvaluator.h)
+add_executable(UnitTest starttest.cpp function_test.cpp function.cpp ExpressionEvaluator.cpp ExpressionEvaluator.h)
