@@ -286,8 +286,10 @@ Expression *ExpressionEvaluator::constructTree() {
   Expression *e = exprStack.top();
   bool changed;
   Expression *simplify = e->simplify(changed);
-  if (simplify)
+  if (simplify){
+    delete e;
     return simplify;
+  }
   else
     return e;
 }

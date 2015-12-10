@@ -44,7 +44,7 @@ void simplifyTest(std::string expression) {
 }
 int main() {
   cout << "simplify test:" << endl << endl;
-  simplifyTest("x*x*x*x");
+  simplifyTest("x*x");
   simplifyTest("x*x*sin(x)");
   simplifyTest("sin(x)/x+cos(x)/x");
   simplifyTest("sin(cos(x))");
